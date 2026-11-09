@@ -97,7 +97,20 @@ table.st th{font-family:'DgB',sans-serif;font-weight:400}
 .pin{width:92px;text-align:center;letter-spacing:4px}
 .savebar{position:sticky;bottom:86px;display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
 .empty-state{padding:28px;text-align:center;line-height:1.6}
-@media print{nav.tabs,header.top,.noprint{display:none!important}.wrap{padding:0}}
+#printSheet{display:none}
+@page{size:A4 portrait;margin:10mm}
+@media print{
+  body.printing>*:not(#printSheet){display:none!important}
+  body.printing #printSheet{display:grid;grid-template-columns:1fr 1fr;gap:0;background:#fff}
+  body.printing{background:#fff}
+}
+.pcard{height:68mm;border:1px dashed #777;display:flex;gap:4mm;align-items:center;padding:4mm 5mm;break-inside:avoid;page-break-inside:avoid;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.pcard img{width:36mm;height:36mm;flex:none}
+.pcard .pt{font-family:'Ttwimteul',sans-serif;font-size:15pt;line-height:1.1}
+.pcard .pn{font-family:'DgB',sans-serif;font-size:17pt;margin-top:2mm}
+.pcard .pg{font-family:'DgR',sans-serif;font-size:10pt;color:#333}
+.pcard .pp{display:inline-block;margin-top:2mm;border:2px solid #000;border-radius:3mm;padding:1mm 3mm;font-family:'DgB',sans-serif;font-size:15pt;letter-spacing:2mm;background:#FFC163}
+.pcard ol{margin:2mm 0 0;padding-left:4.5mm;font-size:9pt;line-height:1.45}
 </style>
 </head>
 <body>
@@ -115,6 +128,7 @@ table.st th{font-family:'DgB',sans-serif;font-weight:400}
   <button data-tab="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>설정(교사)</button>
 </div></nav>
 <div id="layer"></div>
+<div id="printSheet" aria-hidden="true"></div>
 
 <script type="module">
 import { firebaseConfig } from './firebase-config.js';
@@ -369,8 +383,8 @@ function renderSettings(){
     </div>
   </div>
   <div class="card" style="padding:18px;margin-top:16px">
-    <div class="row noprint" style="justify-content:space-between"><p class="sec-title" style="margin:0">3. 모둠 배정과 학생 비밀번호</p><div class="row"><button class="btn small" data-new-pins>비밀번호 모두 새로 만들기</button><button class="btn small" data-print>비밀번호 목록 인쇄</button></div></div>
-    <p class="hint noprint" style="margin-top:6px">비밀번호는 숫자 4자리예요. 인쇄해서 잘라 나눠 주세요.</p>
+    <div class="row noprint" style="justify-content:space-between"><p class="sec-title" style="margin:0">3. 모둠 배정과 학생 비밀번호</p><div class="row"><button class="btn small" data-new-pins>비밀번호 모두 새로 만들기</button><button class="btn small" data-print>비밀번호 카드 인쇄(QR)</button></div></div>
+    <p class="hint noprint" style="margin-top:6px">비밀번호는 숫자 4자리예요. '비밀번호 카드 인쇄'를 누르면 A4 한 장에 8명씩 QR·이름·비밀번호 카드가 나와요. 점선대로 잘라 나눠 주세요.</p>
     <table class="st" style="margin-top:10px"><thead><tr><th>번호</th><th>이름</th><th>모둠</th><th>비밀번호</th></tr></thead><tbody>
     ${ds.map(s => `<tr><td>${s.no}</td><td>${esc(s.name)}</td><td><select class="in" style="min-height:42px;font-size:16px;padding:6px" data-sgroup="${s.id}" aria-label="${esc(s.name)} 모둠"><option value="">모둠 없음</option>${draft.groups.map(g => `<option value="${g.id}" ${s.groupId === g.id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></td><td><input class="in pin" data-spin="${s.id}" value="${esc(draftPins[s.id] || '')}" inputmode="numeric" maxlength="4" aria-label="${esc(s.name)} 비밀번호"></td></tr>`).join('') || '<tr><td colspan="4" class="hint">명단을 먼저 적용해 주세요.</td></tr>'}
     </tbody></table>
@@ -431,7 +445,19 @@ app.addEventListener('click', async e => {
   const am = t.closest('[data-add-mission]'); if (am) { draft.groups.find(g => g.id === am.dataset.addMission).missions.push({ id: uid('m'), text: '' }); render(); const ins = app.querySelectorAll(`[data-mtext^="${am.dataset.addMission}|"]`); ins[ins.length - 1]?.focus(); return; }
   const dm = t.closest('[data-del-mission]'); if (dm) { const [gid, mid] = dm.dataset.delMission.split('|'); const g = draft.groups.find(x => x.id === gid); g.missions = g.missions.filter(m => m.id !== mid); return render(); }
   if (t.closest('[data-new-pins]')) { if (!confirm('모든 학생 비밀번호를 새로 만들까요? 이미 나눠 준 비밀번호는 쓸 수 없게 돼요.')) return; const used = new Set(); draft.students.forEach(s => draftPins[s.id] = randomPin(used)); return render(); }
-  if (t.closest('[data-print]')) return window.print();
+  if (t.closest('[data-print]')) {
+    const list = draft.students.slice().sort((a,b) => a.no - b.no);
+    if (!list.length) { alert('학생 명단을 먼저 적용해 주세요.'); return; }
+    const gname = id => draft.groups.find(g => g.id === id)?.name || '';
+    document.getElementById('printSheet').innerHTML = list.map(s => `<div class="pcard"><img src="qr.png" alt=""><div>
+      <p class="pt">지구력 챌린지</p><p class="pn">${s.no}. ${esc(s.name)}</p><p class="pg">${esc(gname(s.groupId))}</p>
+      <span class="pp">${esc(draftPins[s.id] || '----')}</span>
+      <ol><li>QR을 찍어 앱을 열어요.</li><li>'미션 인증하기'를 눌러요.</li><li>이름을 고르고 비밀번호를 쳐요.</li></ol></div></div>`).join('');
+    const img = document.querySelector('#printSheet img');
+    const go = () => { document.body.classList.add('printing'); setTimeout(() => { window.print(); document.body.classList.remove('printing'); }, 50); };
+    if (img.complete) go(); else { img.onload = go; img.onerror = go; }
+    return;
+  }
   if (t.closest('[data-save]')) {
     const err = document.getElementById('saveErr'); err.textContent = '';
     const bad = draft.students.find(s => !/^\d{4}$/.test(draftPins[s.id] || '')); if (bad) { err.textContent = `${bad.name}의 비밀번호가 숫자 4자리가 아니에요.`; return; }
