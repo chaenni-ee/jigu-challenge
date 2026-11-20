@@ -99,6 +99,16 @@ table.st th{font-family:'DgB',sans-serif;font-weight:400}
 .empty-state{padding:28px;text-align:center;line-height:1.6}
 #printSheet{display:none}
 @page{size:A4 portrait;margin:10mm}
+/* 우리 반 숲 */
+.forest{position:relative;overflow:hidden;border:3px solid var(--ink);border-radius:14px;box-shadow:4px 4px 0 var(--ink);background:var(--sky)}
+.forest .sky{padding:22px 20px 10px;text-align:center}
+.forest .ground{background:var(--grass);border-top:5px solid var(--ink);padding:18px 14px 22px;min-height:180px;display:flex;flex-wrap:wrap;gap:6px 4px;justify-content:center;align-items:flex-end}
+.forest .it{display:inline-block;transition:opacity .35s, transform .35s cubic-bezier(.2,1.6,.4,1)}
+.forest.hide .it{opacity:0;transform:translateY(18px) scale(.4)}
+.stats{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:14px}
+.stat{background:var(--white);border:3px solid var(--ink);border-radius:999px;padding:6px 16px;font-family:'DgB',sans-serif;font-size:18px}
+.stat b{font-weight:400;font-size:24px;color:var(--flame)}
+@media (prefers-reduced-motion:reduce){.forest .it{transition:none}}
 @media print{
   body.printing>*:not(#printSheet){display:none!important}
   body.printing #printSheet{display:grid;grid-template-columns:1fr 1fr;gap:0;background:#fff}
@@ -125,6 +135,7 @@ table.st th{font-family:'DgB',sans-serif;font-weight:400}
 <nav class="tabs" aria-label="메뉴"><div class="in">
   <button data-tab="status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>미션 현황</button>
   <button data-tab="verify"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h4l2-3h6l2 3h4v12H3z"/><circle cx="12" cy="13.5" r="3.6"/></svg>미션 인증하기</button>
+  <button data-tab="forest" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-6M7 16h10L12 3z"/><path d="M5 22h14"/></svg>우리 반 숲</button>
   <button data-tab="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>설정(교사)</button>
 </div></nav>
 <div id="layer"></div>
@@ -395,6 +406,8 @@ function renderSettings(){
       <label class="f">챌린지 시작일(이 날부터 인증 가능)<input class="in" type="date" id="startIn" value="${esc(draft.startDate || '')}"></label>
       <label class="f">교사 비밀번호 바꾸기(빈칸이면 그대로)<input class="in" type="password" id="newPw" minlength="4" autocomplete="new-password"></label>
     </div>
+    <label class="row" style="margin-top:16px;gap:12px;font-family:'DgB';font-size:18px;cursor:pointer"><input type="checkbox" id="forestIn" style="width:26px;height:26px" ${draft.forestOn ? 'checked' : ''}>'우리 반 숲' 탭을 학생들에게 보이기</label>
+    <p class="hint" style="margin-top:4px">꺼 두면 선생님(설정 잠금 해제 상태)에게만 미리보기로 보여요. 4차시 수업 때 켜 주세요.</p>
   </div>
   <p class="err" id="saveErr" role="alert"></p>
   <div class="savebar noprint"><button class="btn primary" data-save>설정 저장하기</button></div>`;
@@ -404,11 +417,56 @@ async function enterSettings(){
 }
 function randomPin(used){ let p; do { p = String(Math.floor(1000 + Math.random() * 9000)); } while (used.has(p)); used.add(p); return p; }
 
+/* ---------------- 화면: 우리 반 숲 ---------------- */
+const forestOk = () => !!(meta?.forestOn || teacher);
+const treeSvg = (c) => `<svg width="44" height="56" viewBox="0 0 44 56" aria-hidden="true"><rect x="18" y="32" width="8" height="22" rx="2" fill="#B07A47" stroke="#000" stroke-width="2.5"/><circle cx="22" cy="20" r="17" fill="${c}" stroke="#000" stroke-width="2.5"/><circle cx="15" cy="14" r="4" fill="#fff" opacity=".35"/></svg>`;
+const sproutSvg = `<svg width="26" height="30" viewBox="0 0 26 30" aria-hidden="true"><path d="M13 29V14" stroke="#000" stroke-width="4" stroke-linecap="round"/><path d="M13 29V14" stroke="#5A8F2E" stroke-width="2" stroke-linecap="round"/><path d="M13 15C6 15 3 10 3 6c6 0 10 3 10 9z" fill="#E3F4BF" stroke="#000" stroke-width="2"/><path d="M13 13c0-6 4-9 10-9 0 5-4 9-10 9z" fill="#E3F4BF" stroke="#000" stroke-width="2"/></svg>`;
+function forestData(){
+  let auth = 0, trees = [], sprouts = 0;
+  const greens = ['#90C54F','#7DB843','#A6D468','#6FAE3A'];
+  students().forEach(s => missionsOf(s).forEach(m => { const c = cnt(s.id, m.id); auth += c; if (c >= NEED) trees.push(greens[(trees.length * 7) % greens.length]); else sprouts += c; }));
+  const gst = groups().reduce((n, g) => n + g.missions.filter(m => groupStamped(g, m)).length, 0);
+  return { auth, trees, sprouts, gst };
+}
+function renderForest(){
+  if (!forestOk()) return `<div class="card empty-state"><p class="hint">아직 열리지 않았어요.</p></div>`;
+  if (!meta || !students().length) return `<div class="card empty-state"><p class="hint">학급 설정이 먼저 필요해요.</p></div>`;
+  const d = forestData();
+  const items = d.trees.map(c => `<span class="it">${treeSvg(c)}</span>`).join('') + Array.from({ length: d.sprouts }, () => `<span class="it">${sproutSvg}</span>`).join('');
+  return `${!meta.forestOn ? '<p class="chip" style="background:var(--sun);margin-bottom:10px">선생님 미리보기 · 학생에게는 아직 안 보여요</p>' : ''}
+  <div class="forest hide" id="forest">
+    <div class="sky">
+      <p style="font-family:'Ttwimteul',sans-serif;font-size:clamp(28px,5vw,44px);line-height:1.15">우리 반이 함께 키운 숲</p>
+      <p class="hint" style="color:#000;margin-top:6px">인증 1번 = 새싹 하나 · 미션 성공(도장) 1개 = 나무 한 그루</p>
+      <div class="stats">
+        <span class="stat">인증 <b data-count="${d.auth}">0</b>번</span>
+        <span class="stat">나무 <b data-count="${d.trees.length}">0</b>그루</span>
+        <span class="stat">새싹 <b data-count="${d.sprouts}">0</b>개</span>
+        <span class="stat">모둠 도장 <b data-count="${d.gst}">0</b>개</span>
+      </div>
+      <button class="btn primary" data-grow style="margin-top:16px">우리 숲 키우기!</button>
+    </div>
+    <div class="ground">${items || '<p class="hint" style="color:#000">아직 인증 기록이 없어요.</p>'}</div>
+  </div>
+  <p style="text-align:center;font-family:'DgB';font-size:20px;margin-top:18px">지구력 챌린지는 끝나도, 우리 숲은 계속 자라요!</p>`;
+}
+function growForest(){
+  const f = document.getElementById('forest'); if (!f) return;
+  const its = [...f.querySelectorAll('.it')], step = Math.min(70, 5000 / Math.max(1, its.length));
+  f.classList.remove('hide');
+  its.forEach((el, i) => { el.style.transitionDelay = `${Math.round(i * step)}ms`; });
+  const total = its.length * step + 400;
+  f.querySelectorAll('[data-count]').forEach(b => { const to = +b.dataset.count, t0 = performance.now();
+    const tick = now => { const k = Math.min(1, (now - t0) / total); b.textContent = Math.round(to * k); if (k < 1) requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
+}
+
 /* ---------------- 그리기 ---------------- */
 function render(){
   document.querySelectorAll('nav.tabs button').forEach(b => { b.classList.toggle('on', b.dataset.tab === tab); b.setAttribute('aria-current', b.dataset.tab === tab ? 'page' : 'false'); });
   if (!metaLoaded) { app.innerHTML = '<p class="empty-state">불러오는 중…</p>'; return; }
-  app.innerHTML = tab === 'status' ? renderStatus() : tab === 'verify' ? renderVerify() : renderSettings();
+  const fb = document.querySelector('nav.tabs [data-tab=forest]'); if (fb) fb.hidden = !forestOk();
+  if (tab === 'forest' && !forestOk()) tab = 'status';
+  app.innerHTML = tab === 'status' ? renderStatus() : tab === 'verify' ? renderVerify() : tab === 'forest' ? renderForest() : renderSettings();
 }
 
 /* ---------------- 이벤트 ---------------- */
@@ -426,6 +484,13 @@ layer.addEventListener('click', async e => {
 });
 app.addEventListener('click', async e => {
   const t = e.target;
+  if (t.closest('[data-grow]')) {
+    if (t.closest('[data-grow]').dataset.again) render();
+    const b = app.querySelector('[data-grow]'); b.disabled = true; b.textContent = '숲이 자라는 중…';
+    requestAnimationFrame(() => requestAnimationFrame(growForest));
+    setTimeout(() => { const x = app.querySelector('[data-grow]'); if (x) { x.textContent = '다시 보기'; x.disabled = false; x.dataset.again = '1'; } }, 5600);
+    return;
+  }
   const v = t.closest('[data-view]'); if (v) { view = v.dataset.view; ss.set('view', view); return render(); }
   const st = t.closest('[data-student]'); if (st) return openStudent(st.dataset.student);
   const mb = t.closest('[data-mid]'); if (mb && !mb.disabled) { form.mid = mb.dataset.mid; form.msg = ''; return render(); }
@@ -463,6 +528,7 @@ app.addEventListener('click', async e => {
     const bad = draft.students.find(s => !/^\d{4}$/.test(draftPins[s.id] || '')); if (bad) { err.textContent = `${bad.name}의 비밀번호가 숫자 4자리가 아니에요.`; return; }
     draft.groups.forEach(g => g.missions = g.missions.filter(m => m.text.trim()));
     draft.startDate = document.getElementById('startIn').value || '';
+    draft.forestOn = document.getElementById('forestIn').checked;
     const pw = document.getElementById('newPw').value; if (pw) { if (pw.length < 4) { err.textContent = '교사 비밀번호는 4자 이상이에요.'; return; } draft.teacherHash = await hash(pw); }
     const keep = {}; draft.students.forEach(s => keep[s.id] = draftPins[s.id]);
     try { await api.savePins(keep); await api.saveMeta(draft); draftPins = keep; draft = structuredClone(draft); err.textContent = ''; alert('저장했어요!'); render(); }
