@@ -236,6 +236,56 @@ const successOf = s => missionsOf(s).filter(m => cnt(s.id, m.id) >= NEED).length
 const groupStamped = (g, m) => { const ms = membersOf(g); return ms.length > 0 && ms.every(s => cnt(s.id, m.id) >= NEED); };
 
 /* ---------------- 화면: 미션 현황 ---------------- */
+/* ---------------- 모둠상 ---------------- */
+const AWARDS = [
+  { k: 'steady', name: '꾸준상', desc: '인증한 날이 가장 많았던 모둠' },
+  { k: 'team', name: '협동상', desc: '모둠 도장을 가장 많이 받은 모둠' },
+  { k: 'cheer', name: '응원상', desc: '모둠원 모두가 고르게 실천한 모둠' },
+  { k: 'grow', name: '성장상', desc: '뒤로 갈수록 인증이 쑥쑥 늘어난 모둠' },
+  { k: 'earth', name: '지구 지킴이상', desc: '플로깅 미션을 가장 열심히 한 모둠' }
+];
+const awardOf = k => AWARDS.find(a => a.k === k);
+function awardScores(gs, sts){
+  const all = []; sts.forEach(s => Object.values(prog[s.id] || {}).forEach(ds => all.push(...ds)));
+  all.sort(); const first = all[0], last = all[all.length - 1];
+  const mid = first ? new Date((new Date(first).getTime() + new Date(last).getTime()) / 2) : null;
+  const midS = mid ? ymd(mid) : '';
+  const out = {};
+  gs.forEach(g => {
+    const ms = sts.filter(s => s.groupId === g.id), n = ms.length || 1;
+    const c = (s, m) => (prog[s.id]?.[m.id] || []).length;
+    const dayCnt = ms.map(s => new Set(g.missions.flatMap(m => prog[s.id]?.[m.id] || [])).size);
+    const tot = ms.map(s => g.missions.reduce((a, m) => a + c(s, m), 0));
+    const stamps = g.missions.filter(m => ms.length && ms.every(s => c(s, m) >= NEED)).length;
+    const succ = ms.reduce((a, s) => a + g.missions.filter(m => c(s, m) >= NEED).length, 0);
+    let early = 0, late = 0; ms.forEach(s => g.missions.forEach(m => (prog[s.id]?.[m.id] || []).forEach(d => { if (d <= midS) early++; else late++; })));
+    const plog = g.missions.filter(m => m.text.includes('플로깅'));
+    const plogN = ms.reduce((a, s) => a + plog.reduce((b, m) => b + c(s, m), 0), 0);
+    const avgDays = dayCnt.reduce((a, b) => a + b, 0) / n, minTot = ms.length ? Math.min(...tot) : 0;
+    out[g.id] = {
+      steady: { v: avgDays, why: `1인당 평균 ${avgDays.toFixed(1)}일 인증` },
+      team: { v: stamps + succ / 1000, why: `모둠 도장 ${stamps}개` },
+      cheer: { v: minTot, why: `모둠원 모두 ${minTot}번 이상 인증` },
+      grow: { v: (late - early) / n, why: `후반 인증 ${late}번 (전반 ${early}번)` },
+      earth: { v: plog.length ? plogN / n : -1, why: plog.length ? `플로깅 1인당 ${(plogN / n).toFixed(1)}번` : '플로깅 미션 없음' }
+    };
+  });
+  return out;
+}
+function suggestAwards(gs, sts){
+  const sc = awardScores(gs, sts), ids = gs.map(g => g.id);
+  const norm = {}; AWARDS.forEach(a => { const vs = ids.map(i => sc[i][a.k].v), lo = Math.min(...vs), hi = Math.max(...vs); ids.forEach(i => { norm[i + a.k] = hi > lo ? (sc[i][a.k].v - lo) / (hi - lo) : 0.5; }); });
+  let best = -1, pick = {};
+  const go = (ai, used, sum, cur) => {
+    if (ai === AWARDS.length || used.size === ids.length) { if (sum > best) { best = sum; pick = { ...cur }; } return; }
+    let placed = false;
+    ids.forEach(i => { if (!used.has(i)) { placed = true; used.add(i); cur[i] = AWARDS[ai].k; go(ai + 1, used, sum + norm[i + AWARDS[ai].k], cur); delete cur[i]; used.delete(i); } });
+    if (!placed) go(ai + 1, used, sum, cur);
+  };
+  go(0, new Set(), 0, {});
+  return pick;
+}
+
 function renderStatus(){
   if (!meta || !students().length) return `<div class="card empty-state"><p class="sec-title" style="margin-top:0">아직 학급 설정이 없어요</p><p class="hint">선생님이 '설정(교사)' 탭에서 학생 명단, 모둠, 모둠별 미션을 먼저 입력해 주세요.</p></div>`;
   const seg = `<div class="seg" role="tablist"><button class="${view==='group'?'on':''}" data-view="group">모둠별 보기</button><button class="${view==='student'?'on':''}" data-view="student">학생별 보기</button></div>`;
@@ -253,7 +303,7 @@ function renderStatus(){
     body = `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(290px,1fr))">${groups().map((g, i) => {
       const ms = membersOf(g), got = g.missions.filter(m => groupStamped(g, m)).length;
       return `<div class="card gcard">
-        <div class="gh" style="background:${colors[i % colors.length]}"><h3>${esc(g.name)}</h3><span style="font-family:'DgB';font-size:18px">모둠 도장 ${got} / ${g.missions.length}</span></div>
+        <div class="gh" style="background:${colors[i % colors.length]}"><div class="row" style="gap:8px"><h3>${esc(g.name)}</h3>${meta.awardsOn && awardOf(meta.awards?.[g.id]) ? `<span class="chip" style="background:var(--sun);font-size:15px">${esc(awardOf(meta.awards[g.id]).name)}</span>` : ''}</div><span style="font-family:'DgB';font-size:18px">모둠 도장 ${got} / ${g.missions.length}</span></div>
         <div class="gb">
           <div class="gstamps">${g.missions.map(m => groupStamped(g, m) ? stampSvg(54, '모둠') : emptyStamp(54)).join('') || '<span class="hint">미션이 아직 없어요</span>'}</div>
           <div>${ms.map(s => `<button class="member" data-student="${s.id}" style="width:100%;background:none;border-left:0;border-right:0;border-top:0;cursor:pointer;text-align:left"><span>${esc(s.name)}</span><span class="row" style="gap:6px"><span class="hint">성공</span><b style="font-family:'DgB';font-weight:400;font-size:18px">${successOf(s)}개</b></span></button>`).join('') || '<p class="hint">모둠원이 없어요</p>'}</div>
@@ -410,12 +460,20 @@ function renderSettings(){
     <label class="row" style="margin-top:16px;gap:12px;font-family:'DgB';font-size:18px;cursor:pointer"><input type="checkbox" id="forestIn" style="width:26px;height:26px" ${draft.forestOn ? 'checked' : ''}>'우리 반 숲' 탭을 학생들에게 보이기</label>
     <p class="hint" style="margin-top:4px">꺼 두면 선생님(설정 잠금 해제 상태)에게만 미리보기로 보여요. 4차시 수업 때 켜 주세요.</p>
   </div>
+  <div class="card noprint" style="padding:18px;margin-top:16px">
+    <div class="row" style="justify-content:space-between"><p class="sec-title" style="margin:0">5. 모둠상</p><button class="btn small sun" data-award-suggest>기록 보고 모둠상 추천받기</button></div>
+    <p class="hint" style="margin-top:6px">인증 기록을 보고 모둠마다 가장 어울리는 상을 하나씩 골라 줘요. 바꾸고 싶으면 직접 고르면 돼요.</p>
+    ${(() => { const sc = awardScores(draft.groups, draft.students); draft.awards = draft.awards || {};
+      return `<table class="st" style="margin-top:10px"><thead><tr><th>모둠</th><th>상</th><th>근거</th></tr></thead><tbody>${draft.groups.map(g => { const k = draft.awards[g.id]; return `<tr><td>${esc(g.name)}</td><td><select class="in" style="min-height:42px;font-size:16px;padding:6px" data-award="${g.id}" aria-label="${esc(g.name)} 모둠상"><option value="">(없음)</option>${AWARDS.map(a => `<option value="${a.k}" ${k === a.k ? 'selected' : ''}>${a.name}</option>`).join('')}</select></td><td class="hint">${k && sc[g.id] ? esc(awardOf(k).desc + ' · ' + sc[g.id][k].why) : ''}</td></tr>`; }).join('')}</tbody></table>`; })()}
+    <label class="row" style="margin-top:14px;gap:12px;font-family:'DgB';font-size:18px;cursor:pointer"><input type="checkbox" id="awardsIn" style="width:26px;height:26px" ${draft.awardsOn ? 'checked' : ''}>모둠상을 '미션 현황 › 모둠별 보기'에 발표하기</label>
+  </div>
   <p class="err" id="saveErr" role="alert"></p>
   <div class="savebar noprint"><button class="btn primary" data-save>설정 저장하기</button></div>`;
 }
 async function enterSettings(){
   draft = structuredClone(meta); draftPins = await api.getPins(); render();
 }
+function syncDraft(){ const a = document.getElementById('forestIn'); if (a) draft.forestOn = a.checked; const b = document.getElementById('awardsIn'); if (b) draft.awardsOn = b.checked; const c = document.getElementById('startIn'); if (c && c.value) draft.startDate = c.value; }
 function randomPin(used){ let p; do { p = String(Math.floor(1000 + Math.random() * 9000)); } while (used.has(p)); used.add(p); return p; }
 
 /* ---------------- 화면: 우리 반 숲 ---------------- */
@@ -510,6 +568,7 @@ app.addEventListener('click', async e => {
   const dg = t.closest('[data-del-group]'); if (dg) { if (!confirm('이 모둠을 지울까요? 모둠원은 "모둠 없음"이 돼요.')) return; draft.groups = draft.groups.filter(g => g.id !== dg.dataset.delGroup); draft.students.forEach(s => { if (s.groupId === dg.dataset.delGroup) s.groupId = ''; }); return render(); }
   const am = t.closest('[data-add-mission]'); if (am) { draft.groups.find(g => g.id === am.dataset.addMission).missions.push({ id: uid('m'), text: '' }); render(); const ins = app.querySelectorAll(`[data-mtext^="${am.dataset.addMission}|"]`); ins[ins.length - 1]?.focus(); return; }
   const dm = t.closest('[data-del-mission]'); if (dm) { const [gid, mid] = dm.dataset.delMission.split('|'); const g = draft.groups.find(x => x.id === gid); g.missions = g.missions.filter(m => m.id !== mid); return render(); }
+  if (t.closest('[data-award-suggest]')) { syncDraft(); draft.awards = suggestAwards(draft.groups, draft.students); return render(); }
   if (t.closest('[data-new-pins]')) { if (!confirm('모든 학생 비밀번호를 새로 만들까요? 이미 나눠 준 비밀번호는 쓸 수 없게 돼요.')) return; const used = new Set(); draft.students.forEach(s => draftPins[s.id] = randomPin(used)); return render(); }
   if (t.closest('[data-print]')) {
     const list = draft.students.slice().sort((a,b) => a.no - b.no);
@@ -530,6 +589,7 @@ app.addEventListener('click', async e => {
     draft.groups.forEach(g => g.missions = g.missions.filter(m => m.text.trim()));
     draft.startDate = document.getElementById('startIn').value || '';
     draft.forestOn = document.getElementById('forestIn').checked;
+    draft.awardsOn = document.getElementById('awardsIn').checked;
     const pw = document.getElementById('newPw').value; if (pw) { if (pw.length < 4) { err.textContent = '교사 비밀번호는 4자 이상이에요.'; return; } draft.teacherHash = await hash(pw); }
     const keep = {}; draft.students.forEach(s => keep[s.id] = draftPins[s.id]);
     try { await api.savePins(keep); await api.saveMeta(draft); draftPins = keep; draft = structuredClone(draft); err.textContent = ''; alert('저장했어요!'); render(); }
@@ -546,6 +606,7 @@ app.addEventListener('input', e => {
 });
 app.addEventListener('change', async e => {
   const t = e.target;
+  if (t.dataset.award && draft) { syncDraft(); draft.awards = draft.awards || {}; draft.awards[t.dataset.award] = t.value; return render(); }
   if (t.dataset.sgroup && draft) { draft.students.find(s => s.id === t.dataset.sgroup).groupId = t.value; }
   if (t.id === 'photoIn' && t.files[0]) {
     form.msg = '사진 준비 중…'; render();
