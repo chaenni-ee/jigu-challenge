@@ -234,6 +234,13 @@ const cnt = (sid, mid) => datesOf(sid, mid).length;
 const missionsOf = s => groupOf(s)?.missions || [];
 const successOf = s => missionsOf(s).filter(m => cnt(s.id, m.id) >= NEED).length;
 const groupStamped = (g, m) => { const ms = membersOf(g); return ms.length > 0 && ms.every(s => cnt(s.id, m.id) >= NEED); };
+/* 지구력 이어가기(개인) */
+const CONT_DEFAULT = { on: true, start: '2026-11-24', missions: [{ id: 'cplog', text: '플로깅' }, { id: 'ccup', text: '용기내 (텀블러·다회용기)' }, { id: 'cbrush', text: '양치컵 사용' }] };
+const cont = () => meta?.cont || CONT_DEFAULT;
+const contActive = () => !!cont().on && today() >= cont().start;
+const contTotal = sid => cont().missions.reduce((a, m) => a + cnt(sid, m.id), 0);
+const contStamps = sid => Math.floor(contTotal(sid) / NEED);
+const allMissionsOf = s => [...missionsOf(s), ...cont().missions];
 
 /* ---------------- 화면: 미션 현황 ---------------- */
 /* ---------------- 모둠상 ---------------- */
@@ -288,8 +295,21 @@ function suggestAwards(gs, sts){
 
 function renderStatus(){
   if (!meta || !students().length) return `<div class="card empty-state"><p class="sec-title" style="margin-top:0">아직 학급 설정이 없어요</p><p class="hint">선생님이 '설정(교사)' 탭에서 학생 명단, 모둠, 모둠별 미션을 먼저 입력해 주세요.</p></div>`;
-  const seg = `<div class="seg" role="tablist"><button class="${view==='group'?'on':''}" data-view="group">모둠별 보기</button><button class="${view==='student'?'on':''}" data-view="student">학생별 보기</button></div>`;
+  const seg = `<div class="seg" role="tablist"><button class="${view==='group'?'on':''}" data-view="group">모둠별 보기</button><button class="${view==='student'?'on':''}" data-view="student">학생별 보기</button><button class="${view==='cont'?'on':''}" data-view="cont">이어가기</button></div>`;
   let body;
+  if (view === 'cont') {
+    const sts = students(), tot = sts.reduce((a, s) => a + contTotal(s.id), 0), st = sts.reduce((a, s) => a + contStamps(s.id), 0);
+    body = `<div class="card" style="padding:16px 20px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+      <div><p style="font-family:'DgB';font-size:22px">지구력 이어가기</p><p class="hint">${esc(cont().missions.map(m => m.text).join(' · '))} 중 무엇이든 인증 ${NEED}번마다 도장 1개! (${md(cont().start)}부터)</p></div>
+      <div class="stats" style="margin:0"><span class="stat">우리 반 인증 <b>${tot}</b>번</span><span class="stat">도장 <b>${st}</b>개</span></div></div>
+    <div class="grid">${sts.map(s => { const t = contTotal(s.id), n = contStamps(s.id);
+      return `<button class="card scard" data-cont="${s.id}">
+        <div class="nm"><b>${s.no}. ${esc(s.name)}</b><span class="hint">인증 ${t}번</span></div>
+        <div class="row" style="gap:8px">${stampSvg(40)}<span style="font-family:'DgB';font-size:22px">${n}</span><span class="hint">개</span></div>
+        <div class="mrow"><span class="t">다음 도장까지</span>${dots(t % NEED)}</div>
+      </button>`; }).join('')}</div>`;
+    return `<div class="row" style="justify-content:space-between;margin:6px 0 16px">${seg}<span class="hint">세 미션 합쳐서 ${NEED}번마다 도장 쾅!</span></div>${body}`;
+  }
   if (view === 'student') {
     body = `<div class="grid">${students().map(s => {
       const ms = missionsOf(s), g = groupOf(s);
@@ -325,9 +345,21 @@ function openStudent(sid){
     </div>`; }).join('') || '<p class="hint">모둠 미션이 아직 없어요.</p>'}
   </div></div>`;
 }
+function openCont(sid){
+  const s = students().find(x => x.id === sid); if (!s) return;
+  const t = contTotal(s.id);
+  layer.innerHTML = `<div class="modal-bg" data-close><div class="card modal" role="dialog" aria-modal="true" aria-label="${esc(s.name)} 이어가기 현황">
+    <div class="mh"><h2>${esc(s.name)} · 지구력 이어가기</h2><button class="btn small" data-close>닫기</button></div>
+    <div class="row" style="gap:10px;margin-bottom:12px">${Array.from({ length: contStamps(s.id) }, () => stampSvg(56)).join('') || '<span class="hint">아직 도장이 없어요</span>'}<span class="hint">다음 도장까지 ${dots(t % NEED)}</span></div>
+    ${cont().missions.map(m => { const ds = datesOf(s.id, m.id); return `<div class="mission-detail">
+      <div class="row" style="justify-content:space-between"><b style="font-family:'DgB';font-weight:400;font-size:19px">${esc(m.text)}</b><span class="hint">${ds.length}번</span></div>
+      <div class="slots">${ds.map(d => `<button class="slot" data-photo="${s.id}|${m.id}|${d}">${md(d)} 사진 보기</button>`).join('') || '<span class="slot empty">아직 없어요</span>'}</div>
+    </div>`; }).join('')}
+  </div></div>`;
+}
 async function openPhoto(key){
   const [sid, mid, date] = key.split('|');
-  const s = students().find(x => x.id === sid), m = missionsOf(s).find(x => x.id === mid);
+  const s = students().find(x => x.id === sid), m = allMissionsOf(s).find(x => x.id === mid);
   layer.insertAdjacentHTML('beforeend', `<div class="modal-bg" data-close id="photoModal"><div class="card modal"><div class="mh"><h2>${esc(s?.name)} · ${md(date)}</h2><button class="btn small" data-close>닫기</button></div><p class="hint" style="margin-bottom:10px">${esc(m?.text || '')}</p><div id="photoBox" class="empty-state">사진 불러오는 중…</div>${teacher ? `<div class="row noprint" style="justify-content:flex-end;margin-top:12px"><button class="btn small danger" data-del="${esc(key)}">이 인증 지우기(교사)</button></div>` : ''}</div></div>`);
   try { const data = await api.getPhoto(`${sid}_${mid}_${date}`); const box = document.getElementById('photoBox'); if (box) box.innerHTML = data ? `<img src="${data}" alt="${esc(s?.name)}의 인증 사진" style="max-width:100%;border-radius:10px;border:2px solid #000">` : '<p class="hint">사진을 찾을 수 없어요.</p>'; }
   catch (e) { const box = document.getElementById('photoBox'); if (box) box.innerHTML = '<p class="err">사진을 불러오지 못했어요.</p>'; }
@@ -350,6 +382,7 @@ function renderVerify(){
         <button class="btn primary" type="submit">들어가기</button>
       </form></div>`;
   }
+  if (contActive()) return renderContVerify(s);
   const ms = missionsOf(s), min = meta.startDate || '';
   const sel = ms.find(m => m.id === form.mid);
   return `<div class="row" style="justify-content:space-between;margin:6px 0 14px">
@@ -370,6 +403,28 @@ function renderVerify(){
       <div class="row" style="justify-content:flex-end;margin-top:18px"><button class="btn primary" id="sendBtn" ${sel && form.photo && !form.busy ? '' : 'disabled'}>${form.busy ? '올리는 중…' : '인증하기'}</button></div>
     </div>`;
 }
+function renderContVerify(s){
+  const c = cont(), ms = c.missions, sel = ms.find(m => m.id === form.mid), t = contTotal(s.id);
+  return `<div class="row" style="justify-content:space-between;margin:6px 0 14px">
+      <p style="font-family:'DgB';font-size:22px">${esc(s.name)}, 지구력을 이어가 볼까요?</p>
+      <button class="btn small" data-logout>나가기</button></div>
+    <div class="card" style="padding:16px 18px;margin-bottom:14px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+      <div><p style="font-family:'DgB';font-size:20px">지구력 이어가기</p><p class="hint">세 미션 중 무엇이든 인증 ${NEED}번마다 도장 1개!</p></div>
+      <div class="row" style="gap:10px">${stampSvg(46)}<span style="font-family:'DgB';font-size:24px">${contStamps(s.id)}개</span><span class="hint">다음 도장까지</span>${dots(t % NEED)}</div></div>
+    <div class="card" style="padding:18px">
+      <p class="sec-title" style="margin-top:0">① 날짜</p>
+      <input class="in" type="date" id="dateIn" value="${form.date}" max="${today()}" min="${c.start}" style="max-width:260px">
+      <p class="sec-title">② 오늘 한 미션</p>
+      <div class="mchoice">${ms.map(m => { const ds = datesOf(s.id, m.id), dup = ds.includes(form.date);
+        return `<button class="mbtn ${form.mid === m.id ? 'sel' : ''}" data-mid="${m.id}" ${dup ? 'disabled' : ''} aria-pressed="${form.mid === m.id}">
+          <span>${esc(m.text)}</span><small>${dup ? '이 날은 이미 인증했어요' : `지금까지 ${ds.length}번`}</small></button>`; }).join('')}</div>
+      <p class="sec-title">③ 인증 사진</p>
+      <label class="photo-drop" for="photoIn">${form.photo ? `<img src="${form.photo}" alt="고른 사진 미리보기"><span class="btn small">다른 사진 고르기</span>` : `<span class="btn sun">사진 찍기 · 고르기</span><span class="hint">얼굴 대신 <b>행동</b>이 보이게 찍어요.<br>예) 주운 쓰레기, 텀블러·반찬통, 양치컵</span>`}</label>
+      <input id="photoIn" type="file" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0">
+      ${form.msg ? `<p class="err" role="alert" style="margin-top:12px">${esc(form.msg)}</p>` : ''}
+      <div class="row" style="justify-content:flex-end;margin-top:18px"><button class="btn primary" id="sendBtn" ${sel && form.photo && !form.busy ? '' : 'disabled'}>${form.busy ? '올리는 중…' : '인증하기'}</button></div>
+    </div>`;
+}
 async function compress(file){
   let src;
   try { src = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
@@ -382,8 +437,9 @@ async function compress(file){
   return out;
 }
 async function send(){
-  const s = students().find(x => x.id === me), m = missionsOf(s).find(x => x.id === form.mid);
+  const s = students().find(x => x.id === me), isCont = contActive(), m = (isCont ? cont().missions : missionsOf(s)).find(x => x.id === form.mid);
   if (!s || !m || !form.photo) return;
+  if (isCont && form.date < cont().start) { form.msg = `${md(cont().start)}부터 인증할 수 있어요.`; return render(); }
   if (form.date > today()) { form.msg = '오늘보다 뒤 날짜는 고를 수 없어요.'; return render(); }
   if (datesOf(s.id, m.id).includes(form.date)) { form.msg = '이 미션은 이 날짜에 이미 인증했어요. 다른 날에 또 도전해요!'; return render(); }
   form.busy = true; form.msg = ''; render();
@@ -391,14 +447,23 @@ async function send(){
     await api.submit({ sid: s.id, mid: m.id, date: form.date, data: form.photo });
     const after = [...new Set([...datesOf(s.id, m.id), form.date])].length;
     prog[s.id] = prog[s.id] || {}; prog[s.id][m.id] = [...new Set([...(prog[s.id][m.id] || []), form.date])];
-    const g = groupOf(s), groupNow = after >= NEED && g && groupStamped(g, m);
     form = { mid: null, date: form.date, photo: null, busy: false, msg: '' };
-    celebrate(after, m.text, groupNow);
+    if (isCont) celebrateCont(contTotal(s.id), m.text);
+    else { const g = groupOf(s), groupNow = after >= NEED && g && groupStamped(g, m); celebrate(after, m.text, groupNow); }
   } catch (e) {
     console.error(e); form.busy = false;
     form.msg = e.code === 'permission-denied' ? '이 미션은 이 날짜에 이미 인증했어요.' : '올리지 못했어요. 인터넷 연결을 확인하고 다시 해 봐요.';
   }
   render();
+}
+function celebrateCont(total, text){
+  const big = total % NEED === 0, r = total % NEED, n = Math.floor(total / NEED);
+  layer.innerHTML = `<div class="celebrate" data-close role="alert">
+    ${big ? stampSvg(300) : `<div class="check"><svg viewBox="0 0 24 24" width="90" height="90" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>`}
+    <p>${big ? `지구력 도장 ${n}개째 쾅!` : `인증 완료! (${r}/${NEED})`}</p>
+    <p class="hint" style="font-size:18px">${esc(text)}${big ? ' · 계속 이어가요!' : ` · ${NEED - r}번 더 하면 도장!`}</p>
+    <button class="btn primary" data-close>확인</button></div>`;
+  const st = layer.querySelector('.celebrate > .stamp'); if (st) st.classList.add('big');
 }
 function celebrate(n, text, groupNow){
   const big = n >= NEED;
@@ -467,13 +532,21 @@ function renderSettings(){
       return `<table class="st" style="margin-top:10px"><thead><tr><th>모둠</th><th>상</th><th>근거</th></tr></thead><tbody>${draft.groups.map(g => { const k = draft.awards[g.id]; return `<tr><td>${esc(g.name)}</td><td><select class="in" style="min-height:42px;font-size:16px;padding:6px" data-award="${g.id}" aria-label="${esc(g.name)} 모둠상"><option value="">(없음)</option>${AWARDS.map(a => `<option value="${a.k}" ${k === a.k ? 'selected' : ''}>${a.name}</option>`).join('')}</select></td><td class="hint">${k && sc[g.id] ? esc(awardOf(k).desc + ' · ' + sc[g.id][k].why) : ''}</td></tr>`; }).join('')}</tbody></table>`; })()}
     <label class="row" style="margin-top:14px;gap:12px;font-family:'DgB';font-size:18px;cursor:pointer"><input type="checkbox" id="awardsIn" style="width:26px;height:26px" ${draft.awardsOn ? 'checked' : ''}>모둠상을 '미션 현황 › 모둠별 보기'에 발표하기</label>
   </div>
+  <div class="card noprint" style="padding:18px;margin-top:16px">
+    <p class="sec-title" style="margin-top:0">6. 지구력 이어가기 (챌린지 이후 개인 미션)</p>
+    <p class="hint">시작일부터는 '미션 인증하기'에 아래 미션만 나와요. 모둠과 상관없이 무엇이든 인증 ${NEED}번마다 도장 1개가 쌓여요. 모둠 챌린지 기록은 그대로 남아요.</p>
+    <label class="row" style="margin-top:12px;gap:12px;font-family:'DgB';font-size:18px;cursor:pointer"><input type="checkbox" id="contOn" style="width:26px;height:26px" ${draft.cont.on ? 'checked' : ''}>지구력 이어가기 사용하기</label>
+    <label class="f" style="margin-top:12px;max-width:300px">시작일<input class="in" type="date" id="contStart" value="${esc(draft.cont.start)}"></label>
+    <div class="col" style="gap:8px;margin-top:12px;max-width:620px">${draft.cont.missions.map((m, i) => `<div class="row" style="flex-wrap:nowrap;gap:6px"><span class="hint" style="width:20px">${i + 1}</span><input class="in" style="min-height:42px;font-size:16px" data-ctext="${m.id}" value="${esc(m.text)}" aria-label="이어가기 미션 ${i + 1}"><button class="btn small" data-cdel="${m.id}" aria-label="이어가기 미션 ${i + 1} 삭제">×</button></div>`).join('')}
+    <button class="btn small" data-cadd style="align-self:flex-start">+ 미션 추가</button></div>
+  </div>
   <p class="err" id="saveErr" role="alert"></p>
   <div class="savebar noprint"><button class="btn primary" data-save>설정 저장하기</button></div>`;
 }
 async function enterSettings(){
-  draft = structuredClone(meta); draftPins = await api.getPins(); render();
+  draft = structuredClone(meta); draft.cont = draft.cont || structuredClone(CONT_DEFAULT); draftPins = await api.getPins(); render();
 }
-function syncDraft(){ const a = document.getElementById('forestIn'); if (a) draft.forestOn = a.checked; const b = document.getElementById('awardsIn'); if (b) draft.awardsOn = b.checked; const c = document.getElementById('startIn'); if (c && c.value) draft.startDate = c.value; }
+function syncDraft(){ const co = document.getElementById('contOn'); if (co) draft.cont.on = co.checked; const cs = document.getElementById('contStart'); if (cs && cs.value) draft.cont.start = cs.value; const a = document.getElementById('forestIn'); if (a) draft.forestOn = a.checked; const b = document.getElementById('awardsIn'); if (b) draft.awardsOn = b.checked; const c = document.getElementById('startIn'); if (c && c.value) draft.startDate = c.value; }
 function randomPin(used){ let p; do { p = String(Math.floor(1000 + Math.random() * 9000)); } while (used.has(p)); used.add(p); return p; }
 
 /* ---------------- 화면: 우리 반 숲 ---------------- */
@@ -484,6 +557,7 @@ function forestData(){
   let auth = 0, trees = [], sprouts = 0;
   const greens = ['#90C54F','#7DB843','#A6D468','#6FAE3A'];
   students().forEach(s => missionsOf(s).forEach(m => { const c = cnt(s.id, m.id); auth += c; if (c >= NEED) trees.push(greens[(trees.length * 7) % greens.length]); else sprouts += c; }));
+  students().forEach(s => { const tt = contTotal(s.id); for (let i = 0; i < Math.floor(tt / NEED); i++) trees.push('#4E9A2A'); sprouts += tt % NEED; auth += tt; });
   const gst = groups().reduce((n, g) => n + g.missions.filter(m => groupStamped(g, m)).length, 0);
   return { auth, trees, sprouts, gst };
 }
@@ -552,6 +626,7 @@ app.addEventListener('click', async e => {
   }
   const v = t.closest('[data-view]'); if (v) { view = v.dataset.view; ss.set('view', view); return render(); }
   const st = t.closest('[data-student]'); if (st) return openStudent(st.dataset.student);
+  const ct = t.closest('[data-cont]'); if (ct) return openCont(ct.dataset.cont);
   const mb = t.closest('[data-mid]'); if (mb && !mb.disabled) { form.mid = mb.dataset.mid; form.msg = ''; return render(); }
   if (t.closest('#sendBtn')) return send();
   if (t.closest('[data-logout]')) { me = null; ss.del('me'); form = { mid: null, date: today(), photo: null, busy: false, msg: '' }; return render(); }
@@ -568,6 +643,8 @@ app.addEventListener('click', async e => {
   const dg = t.closest('[data-del-group]'); if (dg) { if (!confirm('이 모둠을 지울까요? 모둠원은 "모둠 없음"이 돼요.')) return; draft.groups = draft.groups.filter(g => g.id !== dg.dataset.delGroup); draft.students.forEach(s => { if (s.groupId === dg.dataset.delGroup) s.groupId = ''; }); return render(); }
   const am = t.closest('[data-add-mission]'); if (am) { draft.groups.find(g => g.id === am.dataset.addMission).missions.push({ id: uid('m'), text: '' }); render(); const ins = app.querySelectorAll(`[data-mtext^="${am.dataset.addMission}|"]`); ins[ins.length - 1]?.focus(); return; }
   const dm = t.closest('[data-del-mission]'); if (dm) { const [gid, mid] = dm.dataset.delMission.split('|'); const g = draft.groups.find(x => x.id === gid); g.missions = g.missions.filter(m => m.id !== mid); return render(); }
+  if (t.closest('[data-cadd]')) { syncDraft(); draft.cont.missions.push({ id: uid('c'), text: '' }); render(); const ins = app.querySelectorAll('[data-ctext]'); ins[ins.length - 1]?.focus(); return; }
+  const cd = t.closest('[data-cdel]'); if (cd) { syncDraft(); draft.cont.missions = draft.cont.missions.filter(m => m.id !== cd.dataset.cdel); return render(); }
   if (t.closest('[data-award-suggest]')) { syncDraft(); draft.awards = suggestAwards(draft.groups, draft.students); return render(); }
   if (t.closest('[data-new-pins]')) { if (!confirm('모든 학생 비밀번호를 새로 만들까요? 이미 나눠 준 비밀번호는 쓸 수 없게 돼요.')) return; const used = new Set(); draft.students.forEach(s => draftPins[s.id] = randomPin(used)); return render(); }
   if (t.closest('[data-print]')) {
@@ -590,6 +667,7 @@ app.addEventListener('click', async e => {
     draft.startDate = document.getElementById('startIn').value || '';
     draft.forestOn = document.getElementById('forestIn').checked;
     draft.awardsOn = document.getElementById('awardsIn').checked;
+    syncDraft(); draft.cont.missions = draft.cont.missions.filter(m => m.text.trim());
     const pw = document.getElementById('newPw').value; if (pw) { if (pw.length < 4) { err.textContent = '교사 비밀번호는 4자 이상이에요.'; return; } draft.teacherHash = await hash(pw); }
     const keep = {}; draft.students.forEach(s => keep[s.id] = draftPins[s.id]);
     try { await api.savePins(keep); await api.saveMeta(draft); draftPins = keep; draft = structuredClone(draft); err.textContent = ''; alert('저장했어요!'); render(); }
@@ -600,6 +678,7 @@ app.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'dateIn') { form.date = t.value || today(); form.mid = null; form.msg = ''; return render(); }
   if (!draft) return;
+  if (t.dataset.ctext) draft.cont.missions.find(m => m.id === t.dataset.ctext).text = t.value;
   if (t.dataset.gname) draft.groups.find(g => g.id === t.dataset.gname).name = t.value;
   if (t.dataset.mtext) { const [gid, mid] = t.dataset.mtext.split('|'); draft.groups.find(g => g.id === gid).missions.find(m => m.id === mid).text = t.value; }
   if (t.dataset.spin) { t.value = t.value.replace(/\D/g, '').slice(0, 4); draftPins[t.dataset.spin] = t.value; }
